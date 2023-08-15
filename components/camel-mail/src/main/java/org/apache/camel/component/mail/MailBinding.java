@@ -127,63 +127,67 @@ public class MailBinding {
     }
 
     public void populateMailMessage(MailEndpoint endpoint, MimeMessage mimeMessage, Exchange exchange)
-            throws MessagingException, IOException {
-
-        // camel message headers takes precedence over endpoint configuration
-        if (hasRecipientHeaders(exchange)) {
-            setRecipientFromCamelMessage(mimeMessage, endpoint.getConfiguration(), exchange);
-        } else {
-            // fallback to endpoint configuration
-            setRecipientFromEndpointConfiguration(mimeMessage, endpoint, exchange);
-        }
-
-        // set the replyTo if it was passed in as an option in the uri. Note: if it is in both the URI
-        // and headers the headers win.
-        String replyTo = exchange.getIn().getHeader(MailConstants.MAIL_REPLY_TO, String.class);
-        if (replyTo == null) {
-            replyTo = endpoint.getConfiguration().getReplyTo();
-        }
-        if (replyTo != null) {
-            List<InternetAddress> replyToAddresses = new ArrayList<>();
-            for (String reply : splitRecipients(replyTo)) {
-                replyToAddresses
-                        .add(asEncodedInternetAddress(reply.trim(), determineCharSet(endpoint.getConfiguration(), exchange)));
-            }
-            mimeMessage.setReplyTo(replyToAddresses.toArray(new InternetAddress[0]));
-        }
-
-        // must have at least one recipients otherwise we do not know where to send the mail
-        if (mimeMessage.getAllRecipients() == null) {
-            throw new IllegalArgumentException("The mail message does not have any recipients set.");
-        }
-
-        // set the subject if it was passed in as an option in the uri. Note: if it is in both the URI
-        // and headers the headers win.
-        String subject = endpoint.getConfiguration().getSubject();
-        if (subject != null) {
-            mimeMessage.setSubject(subject, ExchangeHelper.getCharsetName(exchange, false));
-        }
-
-        // append the rest of the headers (no recipients) that could be subject, reply-to etc.
-        appendHeadersFromCamelMessage(mimeMessage, endpoint.getConfiguration(), exchange);
-
-        if (empty(mimeMessage.getFrom())) {
-            // lets default the address to the endpoint destination
-            String from = endpoint.getConfiguration().getFrom();
-            mimeMessage.setFrom(asEncodedInternetAddress(from, determineCharSet(endpoint.getConfiguration(), exchange)));
-        }
-
-        // if there is an alternative body provided, set up a mime multipart alternative message
-        if (hasAlternativeBody(endpoint.getConfiguration(), exchange)) {
-            createMultipartAlternativeMessage(mimeMessage, endpoint.getConfiguration(), exchange);
-        } else {
-            if (exchange.getIn(AttachmentMessage.class).hasAttachments()) {
-                appendAttachmentsFromCamel(mimeMessage, endpoint.getConfiguration(), exchange);
+                throws MessagingException, IOException {
+    
+            // camel message headers takes precedence over endpoint configuration
+            if (hasRecipientHeaders(exchange)) {
+                setRecipientFromCamelMessage(mimeMessage, endpoint.getConfiguration(), exchange);
             } else {
-                populateContentOnMimeMessage(mimeMessage, endpoint.getConfiguration(), exchange);
+                // fallback to endpoint configuration
+                setRecipientFromEndpointConfiguration(mimeMessage, endpoint, exchange);
+            }
+    
+            // set the replyTo if it was passed in as an option in the uri. Note: if it is in both the URI
+            // and headers the headers win.
+            String replyTo = exchange.getIn().getHeader(MailConstants.MAIL_REPLY_TO, String.class);
+            if (replyTo == null) {
+                replyTo = endpoint.getConfiguration().getReplyTo();
+            }
+            if (replyTo != null) {
+                List<InternetAddress> replyToAddresses = new ArrayList<>();
+                for (String reply : splitRecipients(replyTo)) {
+                    try {
+                        replyToAddresses
+                                .add(asEncodedInternetAddress(reply.trim(), determineCharSet(endpoint.getConfiguration(), exchange)));
+                    } catch (UnsupportedEncodingException e) {
+                        throw new CamelMailException("Unsupported charset: " + e.getMessage(), e);
+                    }
+                }
+                mimeMessage.setReplyTo(replyToAddresses.toArray(new InternetAddress[0]));
+            }
+    
+            // must have at least one recipients otherwise we do not know where to send the mail
+            if (mimeMessage.getAllRecipients() == null) {
+                throw new IllegalArgumentException("The mail message does not have any recipients set.");
+            }
+    
+            // set the subject if it was passed in as an option in the uri. Note: if it is in both the URI
+            // and headers the headers win.
+            String subject = endpoint.getConfiguration().getSubject();
+            if (subject != null) {
+                mimeMessage.setSubject(subject, ExchangeHelper.getCharsetName(exchange, false));
+            }
+    
+            // append the rest of the headers (no recipients) that could be subject, reply-to etc.
+            appendHeadersFromCamelMessage(mimeMessage, endpoint.getConfiguration(), exchange);
+    
+            if (empty(mimeMessage.getFrom())) {
+                // lets default the address to the endpoint destination
+                String from = endpoint.getConfiguration().getFrom();
+                mimeMessage.setFrom(asEncodedInternetAddress(from, determineCharSet(endpoint.getConfiguration(), exchange)));
+            }
+    
+            // if there is an alternative body provided, set up a mime multipart alternative message
+            if (hasAlternativeBody(endpoint.getConfiguration(), exchange)) {
+                createMultipartAlternativeMessage(mimeMessage, endpoint.getConfiguration(), exchange);
+            } else {
+                if (exchange.getIn(AttachmentMessage.class).hasAttachments()) {
+                    appendAttachmentsFromCamel(mimeMessage, endpoint.getConfiguration(), exchange);
+                } else {
+                    populateContentOnMimeMessage(mimeMessage, endpoint.getConfiguration(), exchange);
+                }
             }
         }
-    }
 
     protected String determineContentType(MailConfiguration configuration, Exchange exchange) {
         // see if we got any content type set
